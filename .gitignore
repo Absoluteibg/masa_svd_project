@@ -1,0 +1,21 @@
+# Environment
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+
+# Results (regenerate anytime)
+results/
+data/
+
+# Models cache (large, re-downloaded automatically)
+.cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Pytest
+.pytest_cache/
