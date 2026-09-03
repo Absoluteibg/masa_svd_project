@@ -43,8 +43,8 @@ def accuracy(y_true: List[bool], y_pred: List[bool]) -> float:
 
 
 def roc_auc(y_true: List[bool], y_scores: List[float]) -> float:
-    """Compute AUC using the trapezoidal rule (no sklearn dependency)."""
-    pairs = sorted(zip(y_scores, y_true), reverse=True)
+    """Compute rank-based AUC, awarding half credit to tied scores."""
+    pairs = sorted(zip(y_scores, y_true), key=lambda item: item[0], reverse=True)
     n_pos = sum(y_true)
     n_neg = len(y_true) - n_pos
     if n_pos == 0 or n_neg == 0:
@@ -52,14 +52,25 @@ def roc_auc(y_true: List[bool], y_scores: List[float]) -> float:
 
     tp = fp = 0
     auc = 0.0
-    prev_fp = 0
 
-    for _, label in pairs:
-        if label:
-            tp += 1
-        else:
-            fp += 1
-            auc += tp  # area under current step
+    index = 0
+    while index < len(pairs):
+        score = pairs[index][0]
+        group_end = index
+        positives = negatives = 0
+        while group_end < len(pairs) and pairs[group_end][0] == score:
+            if pairs[group_end][1]:
+                positives += 1
+            else:
+                negatives += 1
+            group_end += 1
+
+        # Each tied positive beats preceding negatives and receives half credit
+        # against negatives in its own tie group.
+        auc += positives * fp + 0.5 * positives * negatives
+        tp += positives
+        fp += negatives
+        index = group_end
 
     return round(auc / (n_pos * n_neg), 4)
 

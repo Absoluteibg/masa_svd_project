@@ -32,12 +32,14 @@ class VerificationResult:
     sds_risk:         float
     fva_risk:         float
     sca_risk:         float
+    fva_status:       str
 
     def to_dict(self) -> dict:
         return {
             "verdict":          self.verdict,
             "final_risk_score": self.final_risk_score,
             "action":           self.action,
+            "fva_status":       self.fva_status,
             "breakdown": {
                 "sds":      self.sds,
                 "fva_score": self.fva_score,
@@ -67,8 +69,9 @@ class ConfidenceCalibrationAgent:
         self.threshold = threshold
         self.uncertain = uncertain
 
-    def aggregate(self, sds: float, fva_score: float,
-                  sca_score: float) -> VerificationResult:
+    def aggregate(self, sds: float, fva_score: float, sca_score: float,
+                  fva_available: bool = True,
+                  fva_status: str = "success") -> VerificationResult:
         """
         Parameters
         ----------
@@ -84,9 +87,15 @@ class ConfidenceCalibrationAgent:
         fva_risk = float(1.0 - fva_score)
         sca_risk = float(1.0 - sca_score)
 
-        risk = (self.alpha * sds_risk +
-                self.beta  * fva_risk  +
-                self.gamma * sca_risk)
+        if fva_available:
+            risk = (self.alpha * sds_risk +
+                    self.beta  * fva_risk  +
+                    self.gamma * sca_risk)
+        else:
+            # A placeholder score of 0.5 is not evidence of a hallucination.
+            # Renormalise the remaining evidence rather than treating it as risk.
+            available_weight = self.alpha + self.gamma
+            risk = (self.alpha * sds_risk + self.gamma * sca_risk) / available_weight
         risk = round(float(min(max(risk, 0.0), 1.0)), 4)
 
         if risk > self.threshold:
@@ -99,6 +108,10 @@ class ConfidenceCalibrationAgent:
             verdict = "VERIFIED"
             action  = "Safe to present to user."
 
+        if not fva_available and verdict == "VERIFIED":
+            verdict = "UNCERTAIN"
+            action = "Factual verifier unavailable. Present with a warning or retry."
+
         return VerificationResult(
             verdict          = verdict,
             final_risk_score = risk,
@@ -109,4 +122,5 @@ class ConfidenceCalibrationAgent:
             sds_risk         = round(sds_risk,  4),
             fva_risk         = round(fva_risk,  4),
             sca_risk         = round(sca_risk,  4),
+            fva_status       = fva_status,
         )

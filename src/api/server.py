@@ -16,6 +16,8 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pathlib import Path
 
 from src.api.models import (VerifyRequest, VerifyResponse, HealthResponse,
                              Breakdown, SVDAnalysis)
@@ -27,6 +29,7 @@ log = logging.getLogger(__name__)
 
 # ── Global pipeline instance (loaded at startup) ─────────────────────────────
 _pipeline: MASASVDPipeline | None = None
+_UI_PATH = Path(__file__).parent / "static" / "index.html"
 
 
 @asynccontextmanager
@@ -58,6 +61,11 @@ app.add_middleware(
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+@app.get("/", include_in_schema=False)
+def dashboard():
+    """Serve the small, dependency-free verification dashboard."""
+    return FileResponse(_UI_PATH)
+
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 def health():
     return HealthResponse(status="ok",
@@ -81,6 +89,7 @@ def verify(req: VerifyRequest):
             verdict          = result["verdict"],
             final_risk_score = result["final_risk_score"],
             action           = result["action"],
+            fva_status       = result["fva_status"],
             breakdown        = Breakdown(**bd),
             svd_analysis     = SVDAnalysis(**result["svd_analysis"]),
             query            = req.query,
