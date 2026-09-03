@@ -5,8 +5,8 @@ ALGORITHM
 ---------
 1. Embed context sentences   → matrix C  (n × 384)
 2. Embed output  sentences   → matrix G  (m × 384)
-3. SVD of C: C = U_C Σ_C Vᵀ   →  P_C = U_C[:, :k]  (principal subspace)
-4. SVD of G: G = U_G Σ_G Vᵀ   →  P_G = U_G[:, :k]
+3. SVD of C: C = U_C Σ_C Vᵀ   →  P_C = V_C[:, :k]  (embedding subspace)
+4. SVD of G: G = U_G Σ_G Vᵀ   →  P_G = V_G[:, :k]
 5. Cross-product              M = P_Cᵀ P_G            (k × k)
 6. SVD of M                   →  singular values σ
 7. SDS = 1 − σ_min     (worst-case misalignment ∈ [0, 1])
@@ -29,14 +29,9 @@ class SVDSubspaceEngine:
     # ── Private helpers ──────────────────────────────────────────────────────
 
     @staticmethod
-    def _pad(sentences: List[str]) -> List[str]:
-        """SVD needs ≥ 2 rows. Duplicate single-sentence inputs."""
-        return sentences * 2 if len(sentences) == 1 else sentences
-
-    @staticmethod
     def _principal_subspace(matrix: np.ndarray, k: int) -> np.ndarray:
         """
-        Compute top-k left singular vectors of matrix.
+        Compute top-k right singular vectors in the shared embedding space.
 
         Parameters
         ----------
@@ -45,15 +40,15 @@ class SVDSubspaceEngine:
 
         Returns
         -------
-        np.ndarray  shape (n, min(k, n, d))
+        np.ndarray  shape (d, min(k, n, d))
         """
         try:
-            U, _, _ = scipy_svd(matrix, full_matrices=False)
+            _, _, Vt = scipy_svd(matrix, full_matrices=False)
         except np.linalg.LinAlgError:
             # Fallback to numpy's SVD with a different LAPACK driver
-            U, _, _ = np.linalg.svd(matrix, full_matrices=False)
-        actual_k = min(k, U.shape[1])
-        return U[:, :actual_k]
+            _, _, Vt = np.linalg.svd(matrix, full_matrices=False)
+        actual_k = min(k, Vt.shape[0])
+        return Vt[:actual_k].T
 
     # ── Public API ───────────────────────────────────────────────────────────
 
@@ -69,18 +64,17 @@ class SVDSubspaceEngine:
             0 → perfectly aligned (likely correct)
             1 → maximally diverged (likely hallucinated)
         """
-        ctx = self._pad(context_sentences)
-        out = self._pad(output_sentences)
+        C = embed_texts(context_sentences)
+        G = embed_texts(output_sentences)
 
-        C = embed_texts(ctx)
-        G = embed_texts(out)
-
-        k = min(self.k, C.shape[0], G.shape[0], C.shape[1])
+        k = min(self.k, C.shape[0], G.shape[0], C.shape[1], G.shape[1])
+        if k < 1:
+            raise ValueError("SVD k must be at least 1 and both inputs must be non-empty.")
 
         P_C = self._principal_subspace(C, k)
         P_G = self._principal_subspace(G, k)
 
-        M = P_C.T @ P_G  # (k × k) cross-product
+        M = P_C.T @ P_G  # (k × k), always in the shared embedding space
         try:
             _, sigma, _ = scipy_svd(M, full_matrices=False)
         except np.linalg.LinAlgError:
@@ -96,12 +90,11 @@ class SVDSubspaceEngine:
         Extended SDS report — includes all singular values and matrix shapes.
         Useful for debugging and ablation studies.
         """
-        ctx = self._pad(context_sentences)
-        out = self._pad(output_sentences)
-
-        C = embed_texts(ctx)
-        G = embed_texts(out)
-        k = min(self.k, C.shape[0], G.shape[0], C.shape[1])
+        C = embed_texts(context_sentences)
+        G = embed_texts(output_sentences)
+        k = min(self.k, C.shape[0], G.shape[0], C.shape[1], G.shape[1])
+        if k < 1:
+            raise ValueError("SVD k must be at least 1 and both inputs must be non-empty.")
 
         P_C = self._principal_subspace(C, k)
         P_G = self._principal_subspace(G, k)

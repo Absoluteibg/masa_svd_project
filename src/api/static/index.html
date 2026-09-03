@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MASA-SVD | Answer verifier</title>
+  <style>
+    :root { color-scheme: light; --ink:#17223b; --muted:#63708a; --line:#dbe2ee; --page:#f5f7fb; --blue:#315efb; --safe:#087f5b; --warn:#b7791f; --risk:#c53030; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--page); color:var(--ink); font:16px/1.5 Inter, ui-sans-serif, system-ui, sans-serif; }
+    main { width:min(980px, calc(100% - 32px)); margin:48px auto; }
+    h1 { margin:0; font-size:clamp(2rem, 5vw, 3.4rem); letter-spacing:-.045em; }
+    .lede { color:var(--muted); max-width:650px; margin:10px 0 30px; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:18px; padding:24px; box-shadow:0 12px 28px #17223b0a; }
+    label { display:block; font-weight:700; margin:0 0 8px; }
+    textarea { resize:vertical; display:block; width:100%; min-height:105px; padding:13px; border:1px solid #c6d0e1; border-radius:10px; color:var(--ink); font:inherit; }
+    textarea:focus { border-color:var(--blue); outline:3px solid #315efb20; }
+    .field + .field { margin-top:18px; }
+    .controls { display:flex; gap:16px; align-items:center; justify-content:space-between; margin-top:22px; }
+    .toggle { display:flex; gap:8px; align-items:center; color:var(--muted); font-size:.9rem; }
+    button { background:var(--blue); border:0; border-radius:10px; padding:12px 18px; color:white; cursor:pointer; font:700 1rem inherit; }
+    button:disabled { cursor:wait; opacity:.65; }
+    #error { margin:18px 0 0; color:var(--risk); font-weight:650; }
+    #result { margin-top:24px; }
+    .hidden { display:none; }
+    .result-top { display:flex; gap:18px; align-items:center; justify-content:space-between; }
+    .eyebrow { color:var(--muted); font-size:.82rem; font-weight:750; letter-spacing:.08em; text-transform:uppercase; }
+    .verdict { margin:2px 0 0; font-size:1.55rem; }
+    .score { text-align:right; font-variant-numeric:tabular-nums; }
+    .score strong { font-size:2rem; display:block; }
+    .bar { margin:20px 0 7px; height:11px; background:#e7ecf5; border-radius:999px; overflow:hidden; }
+    .bar > div { height:100%; background:var(--blue); border-radius:inherit; transition:width .35s ease; }
+    .action { margin:0; color:var(--muted); }
+    .grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-top:24px; }
+    .metric { border:1px solid var(--line); border-radius:12px; padding:14px; }
+    .metric span { display:block; color:var(--muted); font-size:.85rem; }
+    .metric strong { display:block; margin-top:3px; font-size:1.25rem; font-variant-numeric:tabular-nums; }
+    .notice { margin-top:18px; padding:12px 14px; background:#fff7df; color:#805400; border-radius:10px; font-size:.92rem; }
+    @media (max-width:620px) { main{margin:24px auto}.card{padding:18px}.controls,.result-top{align-items:flex-start;flex-direction:column}.score{text-align:left}.grid{grid-template-columns:1fr;} }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Check an answer before you trust it.</h1>
+    <p class="lede">MASA-SVD combines answer relevance, factual verification, and subspace alignment into one plain-language risk assessment.</p>
+    <section class="card" aria-label="Answer verification form">
+      <div class="field"><label for="query">Question</label><textarea id="query" placeholder="e.g. Who won the 2022 FIFA World Cup?"></textarea></div>
+      <div class="field"><label for="response">Answer to check</label><textarea id="response" placeholder="Paste the AI-generated answer here."></textarea></div>
+      <div class="controls"><label class="toggle"><input id="nli" type="checkbox" checked> Use deeper semantic check (slower first run)</label><button id="submit">Verify answer</button></div>
+      <p id="error" class="hidden" role="alert"></p>
+    </section>
+    <section id="result" class="card hidden" aria-live="polite">
+      <div class="result-top"><div><div class="eyebrow">Assessment</div><h2 id="verdict" class="verdict"></h2></div><div class="score"><span class="eyebrow">Risk score</span><strong id="risk"></strong></div></div>
+      <div class="bar"><div id="riskbar"></div></div><p id="action" class="action"></p>
+      <div class="grid"><div class="metric"><span>Subspace divergence</span><strong id="sds"></strong></div><div class="metric"><span>Factual confidence</span><strong id="fva"></strong></div><div class="metric"><span>Semantic consistency</span><strong id="sca"></strong></div></div>
+      <p id="fva-notice" class="notice hidden"></p>
+    </section>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const submit = $("submit");
+    submit.addEventListener("click", async () => {
+      const query = $("query").value.trim(), llm_response = $("response").value.trim();
+      $("error").classList.add("hidden");
+      if (!query || !llm_response) { $("error").textContent = "Enter both a question and an answer."; $("error").classList.remove("hidden"); return; }
+      submit.disabled = true; submit.textContent = "Checking…";
+      try {
+        const res = await fetch("/verify", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({query, llm_response, use_nli:$("nli").checked}) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Verification failed.");
+        const b = data.breakdown, risk = data.final_risk_score;
+        $("verdict").textContent = data.verdict.replace("_", " "); $("risk").textContent = `${Math.round(risk * 100)}%`; $("riskbar").style.width = `${risk * 100}%`;
+        $("sds").textContent = b.sds.toFixed(2); $("fva").textContent = b.fva_score.toFixed(2); $("sca").textContent = b.sca_score.toFixed(2); $("action").textContent = data.action;
+        const live = data.fva_status === "success", note = $("fva-notice");
+        note.textContent = live ? "" : `Factual API check was unavailable (${data.fva_status.replace("_", " ")}). This result is not treated as evidence that the answer is false.`;
+        note.classList.toggle("hidden", live); $("result").classList.remove("hidden"); $("result").scrollIntoView({behavior:"smooth", block:"nearest"});
+      } catch (error) { $("error").textContent = error.message; $("error").classList.remove("hidden"); }
+      finally { submit.disabled = false; submit.textContent = "Verify answer"; }
+    });
+  </script>
+</body>
+</html>

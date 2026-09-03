@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 import pytest
+from unittest.mock import patch
 
 from src.core.embeddings import embed_texts, embed_single
 from src.core.svd_engine import SVDSubspaceEngine
@@ -81,11 +82,22 @@ class TestSVDEngine:
             f"Unrelated text ({sds_unrelated}) should have higher SDS than related ({sds_related})"
 
     def test_single_sentence_no_crash(self):
-        """Single-sentence inputs trigger padding — should not crash."""
+        """Single-sentence inputs should be represented in embedding space."""
         sds = self.engine.compute_sds(
             ["Who invented the telephone?"],
             ["Alexander Graham Bell."]
         )
+        assert 0.0 <= sds <= 1.0
+
+    def test_unequal_sentence_counts_use_shared_embedding_space(self):
+        """A one-sentence query and multi-sentence answer must not crash."""
+        embeddings = {
+            "q": [1.0, 0.0, 0.0], "a": [1.0, 0.0, 0.0],
+            "b": [0.0, 1.0, 0.0], "c": [0.0, 0.0, 1.0],
+        }
+        with patch("src.core.svd_engine.embed_texts",
+                   side_effect=lambda texts: np.array([embeddings[t] for t in texts])):
+            sds = self.engine.compute_sds(["q"], ["a", "b", "c"])
         assert 0.0 <= sds <= 1.0
 
     def test_full_analysis_keys(self):

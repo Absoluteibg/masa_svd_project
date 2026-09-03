@@ -39,6 +39,7 @@ class VerifyResponse(BaseModel):
     verdict:          str
     final_risk_score: float
     action:           str
+    fva_status:       str
     breakdown:        Breakdown
     svd_analysis:     Optional[SVDAnalysis] = None
     query:            str
@@ -48,4 +49,3 @@ class VerifyResponse(BaseModel):
 class HealthResponse(BaseModel):
     status:  str
     message: str
-    

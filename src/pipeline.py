@@ -100,7 +100,11 @@ class MASASVDPipeline:
         self._sca.use_nli = old_nli
 
         # ── 5. Aggregation ───────────────────────────────────────────────────
-        result = self._cca.aggregate(sds, fva_score, sca_score)
+        result = self._cca.aggregate(
+            sds, fva_score, sca_score,
+            fva_available=self._fva.is_available,
+            fva_status=self._fva.last_status,
+        )
 
         return {
             **result.to_dict(),

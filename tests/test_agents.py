@@ -96,32 +96,50 @@ class TestFVA:
             instance = MockOAI.return_value
             instance.chat.completions.create.return_value = \
                 self._make_mock_response("0.85")
-            with patch.object(
-                __import__("src.config", fromlist=["config"]).config,
-                "has_openai_key", return_value=True
-            ):
+            with patch("src.agents.factual_agent.config") as mock_cfg:
+                mock_cfg.get_fva_provider_settings.return_value = \
+                    ("openai", "test-key", "gpt-4o-mini", None)
+                mock_cfg.has_fva_key.return_value = True
                 agent = FactualVerificationAgent()
-                agent._enabled = True
-                agent._client  = instance
                 score = agent.verify("Who won?", "Argentina won.")
         assert 0.0 <= score <= 1.0
+        assert agent.is_available
 
     def test_fallback_on_no_key(self):
         """No API key → returns 0.5 neutral fallback."""
         with patch("src.agents.factual_agent.config") as mock_cfg:
-            mock_cfg.has_openai_key.return_value = False
-            mock_cfg.FVA_LLM_MODEL = "gpt-4o-mini"
+            mock_cfg.get_fva_provider_settings.return_value = \
+                ("openai", "", "gpt-4o-mini", None)
+            mock_cfg.has_fva_key.return_value = False
             agent = FactualVerificationAgent()
             score = agent.verify("test", "test")
         assert score == 0.5
+        assert agent.last_status == "unconfigured"
 
     def test_parse_error_returns_neutral(self):
         with patch("src.agents.factual_agent.OpenAI") as MockOAI:
             instance = MockOAI.return_value
             instance.chat.completions.create.return_value = \
                 self._make_mock_response("NOT A NUMBER")
-            agent = FactualVerificationAgent()
-            agent._enabled = True
-            agent._client  = instance
-            score = agent.verify("test", "test")
+            with patch("src.agents.factual_agent.config") as mock_cfg:
+                mock_cfg.get_fva_provider_settings.return_value = \
+                    ("openai", "test-key", "gpt-4o-mini", None)
+                mock_cfg.has_fva_key.return_value = True
+                agent = FactualVerificationAgent()
+                score = agent.verify("test", "test")
         assert score == 0.5
+        assert agent.last_status == "invalid_response"
+
+    def test_accepts_a_score_with_explanatory_text(self):
+        assert FactualVerificationAgent._parse_score("Score: 0.92") == 0.92
+
+    def test_gemini_uses_compatible_endpoint(self):
+        with patch("src.agents.factual_agent.OpenAI") as MockOAI:
+            with patch("src.agents.factual_agent.config") as mock_cfg:
+                mock_cfg.get_fva_provider_settings.return_value = (
+                    "gemini", "gemini-key", "gemini-2.5-flash",
+                    "https://generativelanguage.googleapis.com/v1beta/openai/",
+                )
+                mock_cfg.has_fva_key.return_value = True
+                FactualVerificationAgent()
+        assert MockOAI.call_args.kwargs["base_url"].endswith("/openai/")
